@@ -6,6 +6,7 @@ import {
   Users,
   BarChart3,
   Settings,
+  Plug,
   Plus,
   Mail,
   MoreHorizontal,
@@ -169,6 +170,7 @@ const ManagerTeam = () => {
     { title: 'Kanban Board', href: `${basePath}/kanban`, icon: LayoutGrid },
     { title: 'Team', href: `${basePath}/team`, icon: Users },
     { title: 'Analytics', href: `${basePath}/analytics`, icon: BarChart3, isPremium: true },
+    { title: 'Integrations', href: `${basePath}/integrations`, icon: Plug },
     { title: 'Settings', href: `${basePath}/settings`, icon: Settings },
   ];
   const statusColors: Record<string, string> = {

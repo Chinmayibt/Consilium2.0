@@ -7,6 +7,22 @@ from app.core.config import settings
 from app.core.database import init_db
 from app.api.v1.router import api_router
 from app.middleware.cors_preflight import CORSPreflightMiddleware
+from app.consilium.routers import (
+    auth as consilium_auth_router,
+    workspaces as consilium_workspaces_router,
+    projects as consilium_projects_router,
+    tasks as consilium_tasks_router,
+    requirements as consilium_requirements_router,
+    github as consilium_github_router,
+    ai_insights as consilium_ai_insights_router,
+    notifications as consilium_notifications_router,
+)
+from app.consilium.agents.graph import monitoring_loop
+from app.consilium.database import get_db
+from app.consilium.services.notification_service import (
+    ensure_notification_dedupe_index,
+    reset_workspace_signal_data_once,
+)
 
 app = FastAPI(
     title="Meeting Monitor API",
@@ -40,6 +56,7 @@ app.add_middleware(CORSPreflightMiddleware, allow_origins=_cors_origins)
 app.include_router(api_router, prefix="/api/v1")
 
 _stale_sweep_bg_task: Optional[asyncio.Task] = None
+_consilium_monitor_task: Optional[asyncio.Task] = None
 
 
 async def _run_periodic_stale_sweep(interval_hours: int) -> None:
@@ -89,14 +106,27 @@ async def startup_event():
             "(requires STALE_TASK_AUTO_BLOCKERS_ENABLED=true to mark tasks)"
         )
 
+    # PMZero/Consilium monitor startup
+    await ensure_notification_dedupe_index(await get_db())
+    await reset_workspace_signal_data_once()
+    global _consilium_monitor_task
+    _consilium_monitor_task = asyncio.create_task(monitoring_loop())
+    print("✅ Consilium monitoring loop started")
+
 @app.on_event("shutdown")
 async def shutdown_event():
     """Close database connection on shutdown"""
-    global _stale_sweep_bg_task
+    global _stale_sweep_bg_task, _consilium_monitor_task
     if _stale_sweep_bg_task and not _stale_sweep_bg_task.done():
         _stale_sweep_bg_task.cancel()
         try:
             await _stale_sweep_bg_task
+        except asyncio.CancelledError:
+            pass
+    if _consilium_monitor_task and not _consilium_monitor_task.done():
+        _consilium_monitor_task.cancel()
+        try:
+            await _consilium_monitor_task
         except asyncio.CancelledError:
             pass
     from app.core.database import close_db
@@ -109,3 +139,14 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "healthy"}
+
+
+# PMZero/Consilium routers (kept with PMZero-style paths)
+app.include_router(consilium_auth_router.router)
+app.include_router(consilium_workspaces_router.router)
+app.include_router(consilium_projects_router.router)
+app.include_router(consilium_tasks_router.router)
+app.include_router(consilium_requirements_router.router)
+app.include_router(consilium_github_router.router)
+app.include_router(consilium_ai_insights_router.router)
+app.include_router(consilium_notifications_router.router)

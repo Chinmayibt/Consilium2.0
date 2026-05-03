@@ -167,6 +167,86 @@ def _evidence(
     }
 
 
+def build_consilium_event_payload(event: str, payload: dict, result: dict) -> List[Dict[str, Any]]:
+    """
+    Normalize GitHub webhook payloads to Consilium monitoring event shape.
+    This is a fan-out payload only; canonical task mutation remains in this module.
+    """
+    sender = payload.get("sender") or {}
+    sender_login = (sender.get("login") or "").strip()
+    events: List[Dict[str, Any]] = []
+
+    if event == "pull_request":
+        pr = payload.get("pull_request") or {}
+        number = pr.get("number")
+        merged = bool(pr.get("merged"))
+        state = (pr.get("state") or "open").strip().lower()
+        event_state = "merged" if merged else state
+        events.append(
+            {
+                "id": f"github:pr:{number}:{event_state}",
+                "type": "pull_request",
+                "number": number,
+                "title": pr.get("title") or "",
+                "message": pr.get("title") or "",
+                "user": ((pr.get("user") or {}).get("login") or sender_login),
+                "state": state,
+                "merged": merged,
+                "timestamp": (pr.get("updated_at") or pr.get("created_at") or datetime.utcnow().isoformat() + "Z"),
+                "created_at": pr.get("created_at"),
+                "closed_at": pr.get("closed_at"),
+                "html_url": pr.get("html_url"),
+                "task_keys": result.get("keys") or [],
+            }
+        )
+        return events
+
+    if event == "push":
+        for commit in payload.get("commits") or []:
+            sha = ((commit.get("id") or "")[:12]).strip()
+            if not sha:
+                continue
+            author = commit.get("author") or {}
+            events.append(
+                {
+                    "id": f"github:commit:{sha}",
+                    "type": "commit",
+                    "sha": sha,
+                    "message": commit.get("message") or "",
+                    "user": (author.get("username") or author.get("name") or sender_login),
+                    "timestamp": (commit.get("timestamp") or datetime.utcnow().isoformat() + "Z"),
+                    "html_url": commit.get("url"),
+                    "task_keys": result.get("keys") or [],
+                }
+            )
+        return events
+
+    if event == "workflow_run":
+        wr = payload.get("workflow_run") or {}
+        run_id = wr.get("id")
+        conclusion = (wr.get("conclusion") or "").strip().lower()
+        status_or_conclusion = conclusion or ((wr.get("status") or "").strip().lower())
+        events.append(
+            {
+                "id": f"github:workflow_run:{run_id}:{status_or_conclusion or 'unknown'}",
+                "type": "workflow_run",
+                "workflow_run_id": run_id,
+                "message": f"{(wr.get('name') or 'workflow')} {status_or_conclusion}".strip(),
+                "title": wr.get("name") or "workflow_run",
+                "conclusion": conclusion or None,
+                "status": (wr.get("status") or "").strip().lower() or None,
+                "user": (((wr.get("actor") or {}).get("login")) or sender_login),
+                "timestamp": (wr.get("updated_at") or wr.get("created_at") or datetime.utcnow().isoformat() + "Z"),
+                "html_url": wr.get("html_url"),
+                "head_sha": wr.get("head_sha"),
+                "task_keys": result.get("keys") or [],
+            }
+        )
+        return events
+
+    return events
+
+
 async def _mark_tasks_done(
     db,
     project_id: str,
@@ -558,14 +638,20 @@ async def handle_github_webhook(
 
     if event == "pull_request":
         result = await _handle_pull_request(db, payload, project_id)
+        result["project_id"] = project_id
+        result["consilium_events"] = build_consilium_event_payload(event, payload, result)
         await record_github_webhook_on_project(db, project_id, event, delivery, result)
         return (result, None)
     if event == "workflow_run":
         result = await _handle_workflow_run(db, payload, project_id)
+        result["project_id"] = project_id
+        result["consilium_events"] = build_consilium_event_payload(event, payload, result)
         await record_github_webhook_on_project(db, project_id, event, delivery, result)
         return (result, None)
     if event == "push":
         result = await _handle_push(db, payload, project_id)
+        result["project_id"] = project_id
+        result["consilium_events"] = build_consilium_event_payload(event, payload, result)
         await record_github_webhook_on_project(db, project_id, event, delivery, result)
         return (result, None)
 

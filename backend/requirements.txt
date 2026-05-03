@@ -1,6 +1,8 @@
 fastapi
 uvicorn[standard]
 httpx
+PyGithub
+reportlab
 motor
 pymongo
 python-jose[cryptography]

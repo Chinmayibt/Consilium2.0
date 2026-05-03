@@ -16,6 +16,7 @@ import {
   Github,
   Loader2,
   RefreshCw,
+  Plug,
 } from 'lucide-react';
 import DashboardLayout from '@/components/layout/DashboardLayout';
 import { SidebarItem } from '@/components/layout/Sidebar';
@@ -162,6 +163,7 @@ const ManagerSettings = () => {
     { title: 'Kanban Board', href: `${basePath}/kanban`, icon: LayoutGrid },
     { title: 'Team', href: `${basePath}/team`, icon: Users },
     { title: 'Analytics', href: `${basePath}/analytics`, icon: BarChart3, isPremium: true },
+    { title: 'Integrations', href: `${basePath}/integrations`, icon: Plug },
     { title: 'Settings', href: `${basePath}/settings`, icon: Settings },
   ];
   return (

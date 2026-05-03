@@ -1,5 +1,5 @@
 from pathlib import Path
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import field_validator
 from typing import List, Union, Optional
 
@@ -18,6 +18,13 @@ if _ENV_FILE.exists():
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=str(_ENV_FILE) if _ENV_FILE.exists() else ".env",
+        env_file_encoding="utf-8",
+        case_sensitive=True,
+        extra="ignore",
+    )
+
     # MongoDB
     MONGODB_URL: str = "mongodb://localhost:27017"
     MONGODB_DB_NAME: str = "meeting_monitor"
@@ -43,6 +50,16 @@ class Settings(BaseSettings):
 
     # Groq API (for Whisper transcription). Get a key at https://console.groq.com
     GROQ_API_KEY: str = ""
+    # Optional dedicated keys for Consilium agents; if unset, code falls back to GROQ_API_KEY
+    GROQ_REQUIREMENTS_API_KEY: str = ""
+    GROQ_PLANNING_API_KEY: str = ""
+    # Google Gemini (planning graph / monitoring). https://aistudio.google.com/apikey
+    GEMINI_API_KEY: str = ""
+    # Optional aliases (same values as above if you prefer one key per agent)
+    PLANNING_AGENT_KEY: str = ""
+    MONITORING_AGENT_KEY: str = ""
+    RISK_AGENT_KEY: str = ""
+    REPLANNING_AGENT_KEY: str = ""
     TASK_AUTOMATION_PROVIDER: str = "groq"  # groq | gemini
     TASK_AUTOMATION_MODEL: str = "llama-3.3-70b-versatile"
     TASK_AUTOMATION_MATCH_THRESHOLD: float = 0.78
@@ -78,6 +95,10 @@ class Settings(BaseSettings):
     ]
     
     # GitHub → Kanban webhooks (signature required; leave secret empty to reject all deliveries)
+    GITHUB_CLIENT_ID: str = ""
+    GITHUB_CLIENT_SECRET: str = ""
+    GITHUB_REDIRECT_URI: str = ""
+    FRONTEND_URL: str = "http://localhost:5173"
     GITHUB_WEBHOOK_SECRET: str = ""
     GITHUB_TASK_KEY_PREFIX: str = "MM"
     GITHUB_PAT: str = ""
@@ -145,7 +166,17 @@ class Settings(BaseSettings):
     # Minimum peak sample amplitude in a chunk (out of 32767)
     STT_MIN_PEAK: int = 40
 
-    @field_validator("GROQ_API_KEY", mode="before")
+    @field_validator(
+        "GROQ_API_KEY",
+        "GROQ_REQUIREMENTS_API_KEY",
+        "GROQ_PLANNING_API_KEY",
+        "GEMINI_API_KEY",
+        "PLANNING_AGENT_KEY",
+        "MONITORING_AGENT_KEY",
+        "RISK_AGENT_KEY",
+        "REPLANNING_AGENT_KEY",
+        mode="before",
+    )
     @classmethod
     def strip_groq_api_key(cls, v: str) -> str:
         if v is None:
@@ -180,9 +211,4 @@ class Settings(BaseSettings):
             return [origin.strip() for origin in v.split(",") if origin.strip()]
         return []
     
-    class Config:
-        env_file = str(_ENV_FILE) if _ENV_FILE.exists() else ".env"
-        env_file_encoding = "utf-8"
-        case_sensitive = True
-
 settings = Settings()

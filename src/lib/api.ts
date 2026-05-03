@@ -442,6 +442,229 @@ export function getGithubWebhookCallbackUrl(): string {
   return "/api/v1/webhooks/github";
 }
 
+export interface ConsiliumGithubRepo {
+  id: number;
+  name: string;
+  full_name: string;
+  owner: string;
+  private?: boolean;
+}
+
+export interface ConsiliumGithubRepoSummary {
+  full_name: string;
+  stars: number;
+  forks: number;
+  html_url: string;
+}
+
+export interface ConsiliumGithubActivity {
+  repo: ConsiliumGithubRepoSummary | null;
+  commits: Array<Record<string, unknown>>;
+  pulls: Array<Record<string, unknown>>;
+  pull_requests?: Array<Record<string, unknown>>;
+}
+
+export interface ConsiliumResolveWorkspaceResponse {
+  workspace_id: string;
+}
+
+export async function resolveConsiliumWorkspaceId(
+  token: string,
+  projectId: string,
+): Promise<string> {
+  const res = await fetch(
+    `${apiBaseUrl}/api/workspaces/resolve-project/${encodeURIComponent(projectId)}`,
+    {
+      method: "POST",
+      headers: getAuthHeaders(token),
+    },
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(typeof err.detail === "string" ? err.detail : "Failed to resolve workspace");
+  }
+  const data: ConsiliumResolveWorkspaceResponse = await res.json();
+  return data.workspace_id;
+}
+
+export function getConsiliumGithubConnectUrl(workspaceId: string): string {
+  const base = apiBaseUrl ? apiBaseUrl : window.location.origin;
+  return `${base.replace(/\/$/, "")}/api/github/connect?workspace_id=${encodeURIComponent(workspaceId)}`;
+}
+
+export async function listConsiliumGithubRepos(
+  token: string,
+  workspaceId: string,
+): Promise<ConsiliumGithubRepo[]> {
+  const res = await fetch(`${apiBaseUrl}/api/workspaces/${encodeURIComponent(workspaceId)}/github/repos`, {
+    headers: getAuthHeaders(token),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(typeof err.detail === "string" ? err.detail : "Failed to load GitHub repositories");
+  }
+  return res.json();
+}
+
+export async function selectConsiliumGithubRepo(
+  token: string,
+  workspaceId: string,
+  payload: { owner: string; name: string },
+): Promise<void> {
+  const res = await fetch(`${apiBaseUrl}/api/workspaces/${encodeURIComponent(workspaceId)}/github/repo`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders(token) },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(typeof err.detail === "string" ? err.detail : "Failed to save GitHub repository");
+  }
+}
+
+export async function getConsiliumGithubActivity(
+  token: string,
+  workspaceId: string,
+): Promise<ConsiliumGithubActivity> {
+  const res = await fetch(`${apiBaseUrl}/api/workspaces/${encodeURIComponent(workspaceId)}/github/activity`, {
+    headers: getAuthHeaders(token),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(typeof err.detail === "string" ? err.detail : "Failed to load GitHub activity");
+  }
+  return res.json();
+}
+
+export interface ConsiliumPrd {
+  overview: string;
+  problem_statement: string;
+  target_users: string[];
+  market_analysis: string[];
+  features: string[];
+  user_stories: string[];
+  functional_requirements: string[];
+  non_functional_requirements: string[];
+  tech_stack: string[];
+  system_architecture: string[];
+  database_design: string[];
+  api_design: string[];
+  security: string[];
+  performance: string[];
+  deployment: string[];
+  folder_structure: string[];
+  milestones: string[];
+  mvp_scope: string[];
+  future_enhancements: string[];
+  [key: string]: unknown;
+}
+
+export interface ConsiliumRoadmapPhase {
+  phase?: string;
+  title?: string;
+  date_range?: string;
+  items?: string[];
+}
+
+export interface ConsiliumRoadmapTask {
+  id?: string;
+  title?: string;
+  description?: string;
+  status?: string;
+  assigned_to?: string;
+  assigned_to_name?: string;
+}
+
+export interface ConsiliumRoadmap {
+  phases: ConsiliumRoadmapPhase[];
+  tasks: ConsiliumRoadmapTask[];
+}
+
+export async function generateConsiliumPrd(
+  token: string,
+  workspaceId: string,
+  payload: {
+    product_name: string;
+    product_description: string;
+    target_users: string;
+    key_features: string;
+    competitors?: string;
+    constraints?: string;
+  },
+): Promise<ConsiliumPrd> {
+  const res = await fetch(`${apiBaseUrl}/api/workspaces/${encodeURIComponent(workspaceId)}/generate-prd`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders(token) },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(typeof err.detail === "string" ? err.detail : "Failed to generate PRD");
+  }
+  const data = (await res.json()) as { prd: ConsiliumPrd };
+  return data.prd;
+}
+
+export async function getConsiliumPrd(
+  token: string,
+  workspaceId: string,
+): Promise<{ prd: ConsiliumPrd | null; prd_status: string }> {
+  const res = await fetch(`${apiBaseUrl}/api/workspaces/${encodeURIComponent(workspaceId)}/prd`, {
+    headers: getAuthHeaders(token),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(typeof err.detail === "string" ? err.detail : "Failed to load PRD");
+  }
+  return res.json();
+}
+
+export async function saveConsiliumPrd(
+  token: string,
+  workspaceId: string,
+  prd: ConsiliumPrd,
+): Promise<void> {
+  const res = await fetch(`${apiBaseUrl}/api/workspaces/${encodeURIComponent(workspaceId)}/prd`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...getAuthHeaders(token) },
+    body: JSON.stringify({ prd }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(typeof err.detail === "string" ? err.detail : "Failed to save PRD");
+  }
+}
+
+export async function finalizeConsiliumPrd(
+  token: string,
+  workspaceId: string,
+): Promise<{ prd_status: string; roadmap: Record<string, unknown> | null }> {
+  const res = await fetch(`${apiBaseUrl}/api/workspaces/${encodeURIComponent(workspaceId)}/finalize-prd`, {
+    method: "POST",
+    headers: getAuthHeaders(token),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(typeof err.detail === "string" ? err.detail : "Failed to finalize PRD");
+  }
+  return res.json();
+}
+
+export async function getConsiliumRoadmap(
+  token: string,
+  workspaceId: string,
+): Promise<ConsiliumRoadmap | null> {
+  const res = await fetch(`${apiBaseUrl}/api/workspaces/${encodeURIComponent(workspaceId)}/roadmap`, {
+    headers: getAuthHeaders(token),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(typeof err.detail === "string" ? err.detail : "Failed to load roadmap");
+  }
+  const data = (await res.json()) as { roadmap: ConsiliumRoadmap | null };
+  return data.roadmap;
+}
+
 /** Project owner only: link `owner/repo` and toggle webhook deliveries. */
 export async function patchProjectGitHub(
   token: string,

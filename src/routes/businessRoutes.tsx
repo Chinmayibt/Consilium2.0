@@ -10,6 +10,14 @@ import ManagerKanban from "@/pages/corporate/ManagerKanban";
 import ManagerTeam from "@/pages/corporate/ManagerTeam";
 import ManagerAnalytics from "@/pages/corporate/ManagerAnalytics";
 import ManagerSettings from "@/pages/corporate/ManagerSettings";
+import ManagerIntegrations from "@/pages/corporate/ManagerIntegrations";
+import ManagerMonitoring from "@/pages/corporate/ManagerMonitoring";
+import ManagerRisks from "@/pages/corporate/ManagerRisks";
+import ManagerActivity from "@/pages/corporate/ManagerActivity";
+import ManagerAgentsInfo from "@/pages/corporate/ManagerAgentsInfo";
+import ManagerRequirements from "@/pages/corporate/ManagerRequirements";
+import ManagerPrd from "@/pages/corporate/ManagerPrd";
+import ManagerRoadmap from "@/pages/corporate/ManagerRoadmap";
 import CorporateMeetingDetails from "@/pages/corporate/CorporateMeetingDetails";
 import TeamMemberDashboard from "@/pages/corporate/TeamMemberDashboard";
 import TeamMemberMeetings from "@/pages/corporate/TeamMemberMeetings";
@@ -103,6 +111,14 @@ export const businessRoutes = (
       <Route path="kanban" element={<ManagerKanban />} />
       <Route path="team" element={<ManagerTeam />} />
       <Route path="analytics" element={<ManagerAnalytics />} />
+      <Route path="integrations" element={<ManagerIntegrations />} />
+      <Route path="requirements" element={<ManagerRequirements />} />
+      <Route path="prd" element={<ManagerPrd />} />
+      <Route path="roadmap" element={<ManagerRoadmap />} />
+      <Route path="monitoring" element={<ManagerMonitoring />} />
+      <Route path="risks" element={<ManagerRisks />} />
+      <Route path="activity" element={<ManagerActivity />} />
+      <Route path="agents" element={<ManagerAgentsInfo />} />
       <Route path="meeting/:meetingId" element={<CorporateMeetingDetails role="manager" />} />
       <Route path="settings" element={<ManagerSettings />} />
     </Route>

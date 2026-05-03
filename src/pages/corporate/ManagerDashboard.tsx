@@ -7,6 +7,7 @@ import {
   Users,
   BarChart3,
   Settings,
+  Plug,
   TrendingUp,
   Clock,
   CheckCircle2,
@@ -17,7 +18,6 @@ import {
 } from 'lucide-react';
 import { Link, useParams, useNavigate } from 'react-router-dom';
 import DashboardLayout from '@/components/layout/DashboardLayout';
-import { SidebarItem } from '@/components/layout/Sidebar';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -26,6 +26,7 @@ import { Progress } from '@/components/ui/progress';
 import { format } from 'date-fns';
 import { useAuth } from '@/context/AuthContext';
 import { getProject, listMeetings, type MeetingBotListItem, type ApiTask, type ProjectMember } from '@/lib/api';
+import { managerNavItems } from '@/pages/corporate/managerNav';
 
 const ManagerDashboard = () => {
   const { user, token } = useAuth();
@@ -75,16 +76,6 @@ const ManagerDashboard = () => {
   const totalTasks = tasks.length;
   const teamScore = totalTasks > 0 ? Math.round((taskStats.done / totalTasks) * 100) : 0;
 
-  const managerSidebarItems: SidebarItem[] = [
-    { title: 'Dashboard', href: `${basePath}/dashboard`, icon: LayoutDashboard },
-    { title: 'Meetings', href: `${basePath}/meetings`, icon: Calendar, badge: upcomingMeetings.length },
-    { title: 'Tasks', href: `${basePath}/tasks`, icon: ListTodo, badge: taskStats.todo + taskStats.inProgress },
-    { title: 'Kanban Board', href: `${basePath}/kanban`, icon: LayoutGrid },
-    { title: 'Team', href: `${basePath}/team`, icon: Users },
-    { title: 'Analytics', href: `${basePath}/analytics`, icon: BarChart3 },
-    { title: 'Settings', href: `${basePath}/settings`, icon: Settings },
-  ];
-
   const taskCountByMember = (memberId: string) =>
     tasks.filter((t) => t.assignee_id === memberId).length;
   const doneCountByMember = (memberId: string) =>
@@ -92,7 +83,7 @@ const ManagerDashboard = () => {
 
   return (
     <DashboardLayout
-      sidebarItems={managerSidebarItems}
+      sidebarItems={managerNavItems(workspaceId ?? "")}
       sidebarTitle="Manager"
       sidebarSubtitle="Business Dashboard"
     >
@@ -279,6 +270,18 @@ const ManagerDashboard = () => {
                   </Button>
                 </Link>
               </div>
+            </CardContent>
+          </Card>
+
+          <Card className="shadow-card">
+            <CardHeader>
+              <CardTitle>Requirements & Planning</CardTitle>
+              <CardDescription>Open PMZero requirements/planning flow</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <Link to={`${basePath}/requirements`}><Button className="w-full" variant="outline">Requirements Agent</Button></Link>
+              <Link to={`${basePath}/prd`}><Button className="w-full" variant="outline">PRD</Button></Link>
+              <Link to={`${basePath}/roadmap`}><Button className="w-full" variant="outline">Roadmap</Button></Link>
             </CardContent>
           </Card>
         </div>
