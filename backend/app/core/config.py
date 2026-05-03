@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     GROQ_API_KEY: str = ""
     # Optional dedicated keys for Consilium agents; if unset, code falls back to GROQ_API_KEY
     GROQ_REQUIREMENTS_API_KEY: str = ""
+    GROQ_REQUIREMENTS_API_KEY_PRIMARY: str = ""
+    GROQ_REQUIREMENTS_API_KEY_SECONDARY: str = ""
+    GROQ_REQUIREMENTS_MODEL: str = "llama-3.3-70b-versatile"
     GROQ_PLANNING_API_KEY: str = ""
     # Google Gemini (planning graph / monitoring). https://aistudio.google.com/apikey
     GEMINI_API_KEY: str = ""
@@ -169,6 +172,8 @@ class Settings(BaseSettings):
     @field_validator(
         "GROQ_API_KEY",
         "GROQ_REQUIREMENTS_API_KEY",
+        "GROQ_REQUIREMENTS_API_KEY_PRIMARY",
+        "GROQ_REQUIREMENTS_API_KEY_SECONDARY",
         "GROQ_PLANNING_API_KEY",
         "GEMINI_API_KEY",
         "PLANNING_AGENT_KEY",

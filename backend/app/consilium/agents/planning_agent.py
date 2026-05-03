@@ -27,6 +27,8 @@ class PlanningState(TypedDict, total=False):
 GEMINI_MODEL = "gemini-2.5-flash"
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 REQUEST_TIMEOUT = 90.0
+MIN_PLANNER_TASKS = 0
+MAX_PLANNER_TASKS = 2
 
 
 def _get_api_key() -> str:
@@ -54,7 +56,13 @@ def _norm_title(title: str) -> str:
 def _role_text(member: Dict[str, Any]) -> str:
     raw_skills = member.get("skills") or []
     skills = raw_skills if isinstance(raw_skills, str) else " ".join(str(x) for x in raw_skills)
-    return f"{member.get('role') or ''} {skills}".lower()
+    return (
+        f"{member.get('role') or ''} "
+        f"{member.get('profile_role') or ''} "
+        f"{member.get('job_role') or ''} "
+        f"{member.get('title') or ''} "
+        f"{skills}"
+    ).lower()
 
 
 def _is_manager(member: Dict[str, Any]) -> bool:
@@ -100,6 +108,21 @@ def _extract_feature_desc(raw: str) -> str:
         desc = ":".join(raw.split(":")[1:]).strip()
         return desc if desc else raw
     return raw
+
+
+def _simplify_task_title(raw_title: str, fallback: str) -> str:
+    base = _extract_feature_name(str(raw_title or "").strip()) or fallback
+    base = re.sub(r"\s+", " ", base).strip(" -_:,.;")
+    lowered = base.lower()
+    for prefix in ("implement build ", "build implement ", "implement ", "build ", "write tests for "):
+        if lowered.startswith(prefix):
+            base = base[len(prefix):].strip()
+            lowered = base.lower()
+    if not base:
+        base = fallback
+    if len(base) > 60:
+        base = base[:60].rsplit(" ", 1)[0].strip() or base[:60].strip()
+    return f"Implement {base}".strip()
 
 
 def _clean_prd_features(prd: Dict[str, Any]) -> tuple[List[str], Dict[str, str]]:
@@ -387,58 +410,23 @@ def _normalize_plan_output(
     tasks_raw = phased_tasks if phased_tasks else [dict(t) for t in flat_from_plan if isinstance(t, dict)]
 
     # -----------------------------------------------------------------------
-    # ROOT CAUSE FIX 3: Safe fallback task builder
-    #
-    # The old fallback did:
-    #   title = f"Implement {feature}"   ← feature was a 500-char paragraph
-    #   desc  = f"Design, implement, and test the '{feature}' feature."
-    #                                    ← "test" → workstream=qa for ALL
-    #
-    # The new fallback:
-    #   1. Cleans feature names with _clean_prd_features() first
-    #   2. Uses the SHORT name for the title (< 60 chars)
-    #   3. Uses the extracted description as the task description
-    #   4. Does NOT include "test" in the generic description template
-    #   5. Adds separate QA tasks explicitly, named "Write tests for X"
-    #      so their workstream is correctly detected as "qa"
+    # Safe fallback task builder (simple mode)
+    # - Keep roadmap tasks intentionally small and reviewable
+    # - Generate concise action titles only
+    # - Never force QA/frontend/backend triplets
     # -----------------------------------------------------------------------
     if not tasks_raw:
         clean_names, name_to_desc = _clean_prd_features(prd)
-        if not clean_names:
-            clean_names = ["Core MVP"]
-            name_to_desc = {"Core MVP": "Build the core MVP functionality."}
-
         tasks_raw = []
-        for name in clean_names:
-            desc = name_to_desc.get(name, f"Build and deliver the {name} feature end-to-end.")
-            # Backend task — no "test" in description
+        for name in clean_names[:MAX_PLANNER_TASKS]:
+            desc = name_to_desc.get(name, f"Implement and validate {name}.")
             tasks_raw.append({
-                "title": f"Build {name} API and data layer",
-                "description": f"{desc} Implement REST endpoints, data models, and business logic.",
-                "workstream": "backend",
+                "title": _simplify_task_title(name, "MVP feature"),
+                "description": str(desc).strip()[:220],
+                "workstream": "general",
                 "dependencies": [],
                 "priority": "medium",
-                "estimated_effort": 12.0,
-                "status": "todo",
-            })
-            # Frontend task
-            tasks_raw.append({
-                "title": f"Build {name} UI components",
-                "description": f"Implement the frontend screens and components for {name}. Integrate with backend APIs.",
-                "workstream": "frontend",
-                "dependencies": [],
-                "priority": "medium",
-                "estimated_effort": 10.0,
-                "status": "todo",
-            })
-            # QA task — explicitly named "Write tests" so workstream=qa is unambiguous
-            tasks_raw.append({
-                "title": f"Write tests for {name}",
-                "description": f"Write unit, integration, and E2E test cases for {name}. Cover happy path and edge cases.",
-                "workstream": "qa",
-                "dependencies": [],
-                "priority": "medium",
-                "estimated_effort": 6.0,
+                "estimated_effort": 8.0,
                 "status": "todo",
             })
 
@@ -447,6 +435,7 @@ def _normalize_plan_output(
         t for t in tasks_raw
         if not (nt := _norm_title(str(t.get("title") or ""))) or nt not in blocked_titles
     ] or list(tasks_raw)
+    tasks_filtered = tasks_filtered[:MAX_PLANNER_TASKS]
 
     phases = roadmap.get("phases") or []
     if not isinstance(phases, list) or not phases:
@@ -493,12 +482,7 @@ def _normalize_plan_output(
         # extract the clean name here as a last resort.
         # -----------------------------------------------------------------------
         raw_title = str(normalized_task.get("title") or f"Task {idx + 1}")
-        if len(raw_title) > 100:
-            raw_title = _extract_feature_name(raw_title)
-            if raw_title.lower().startswith("implement "):
-                raw_title = raw_title[len("implement "):]
-            raw_title = f"Implement {raw_title}"
-        normalized_task["title"] = raw_title
+        normalized_task["title"] = _simplify_task_title(raw_title, f"Task {idx + 1}")
 
         description = str(normalized_task.get("description") or "").strip()
         # -----------------------------------------------------------------------
@@ -553,11 +537,17 @@ def _normalize_plan_output(
             normalized_task["assigned_to"] = assignee_id
             normalized_task["assigned_to_name"] = assignee.get("name")
             normalized_task["assigned_user_id"] = assignee_id
-            normalized_task["assigned_to_role"] = assignee.get("role")
+            normalized_task["assigned_to_role"] = (
+                assignee.get("profile_role")
+                or assignee.get("job_role")
+                or assignee.get("title")
+                or assignee.get("role")
+            )
             assignment_count[assignee_id] = assignment_count.get(assignee_id, 0) + 1
 
         normalized_tasks.append(normalized_task)
 
+    normalized_tasks = normalized_tasks[:MAX_PLANNER_TASKS]
     id_set = {t["id"] for t in normalized_tasks}
     title_to_id = {_norm_title(t["title"]): t["id"] for t in normalized_tasks}
     for t in normalized_tasks:
@@ -603,30 +593,98 @@ def _normalize_plan_output(
     if errs:
         roadmap.setdefault("planning_validation_errors", []).extend(errs)
 
-    phase_order: OrderedDict = OrderedDict()
+    phase_task_map: OrderedDict[str, List[Dict[str, Any]]] = OrderedDict()
     for t in normalized_tasks:
         pname = str(t.get("phase") or "General")
-        phase_order.setdefault(pname, []).append(t)
+        phase_task_map.setdefault(pname, []).append(t)
+
+    source_phases = roadmap.get("phases") if isinstance(roadmap.get("phases"), list) else []
+    if not source_phases:
+        source_phases = _synthesize_phases(prd)
+
+    # Preserve full roadmap phase sequence even when initial tasks are capped.
+    ordered_phase_names: List[str] = []
+    source_phase_by_name: Dict[str, Dict[str, Any]] = {}
+    for idx, ph in enumerate(source_phases):
+        if not isinstance(ph, dict):
+            continue
+        nm = str(ph.get("name") or ph.get("title") or ph.get("phase") or f"Phase {idx + 1}").strip()
+        if not nm:
+            nm = f"Phase {idx + 1}"
+        if nm not in source_phase_by_name:
+            ordered_phase_names.append(nm)
+            source_phase_by_name[nm] = ph
+    for nm in phase_task_map.keys():
+        if nm not in source_phase_by_name:
+            ordered_phase_names.append(nm)
+            source_phase_by_name[nm] = {"title": nm}
 
     rebuilt: List[Dict[str, Any]] = []
-    ordered_phases = sorted(phase_order.items(), key=lambda kv: (_phase_rank(kv[0]), kv[0].lower()))
-    for i, (name, ptasks) in enumerate(ordered_phases):
+    milestone_tracker: List[Dict[str, str]] = []
+    for i, name in enumerate(ordered_phase_names):
+        ptasks = phase_task_map.get(name, [])
+        src_phase = source_phase_by_name.get(name) or {}
         deadlines = sorted(str(x.get("deadline") or "") for x in ptasks if x.get("deadline"))
-        phase_date_range = f"{deadlines[0]} -> {deadlines[-1]}" if deadlines else ""
+        phase_date_range = f"{deadlines[0]} -> {deadlines[-1]}" if deadlines else str(src_phase.get("date_range") or "")
         workstreams = sorted({_workstream_from_task(t) for t in ptasks})
         how = "Execute in dependency order with design/implementation/testing handoff. Each task includes acceptance validation before moving to next phase."
+        owners = sorted(
+            {
+                str(x.get("assigned_to_name") or "Unassigned")
+                for x in ptasks
+                if x.get("title")
+            }
+        )
+        stream_groups: Dict[str, List[str]] = {}
+        for task in ptasks:
+            stream = str(task.get("workstream") or "general")
+            stream_groups.setdefault(stream, []).append(str(task.get("title") or "Untitled task"))
+        streams = [
+            {
+                "stream": stream,
+                "owner": owners[0] if owners else "Unassigned",
+                "actions": titles[:4],
+            }
+            for stream, titles in sorted(stream_groups.items())
+        ]
+        deliverables = [pt["title"] for pt in ptasks[:6]]
+        if not deliverables:
+            src_deliverables = src_phase.get("deliverables")
+            if isinstance(src_deliverables, list):
+                deliverables = [str(x) for x in src_deliverables if str(x).strip()][:6]
+        if not streams:
+            src_streams = src_phase.get("streams")
+            if isinstance(src_streams, list):
+                streams = [s for s in src_streams if isinstance(s, dict)]
+        if not owners:
+            src_owners = src_phase.get("owners")
+            if isinstance(src_owners, list):
+                owners = [str(x) for x in src_owners if str(x).strip()]
+        goal = f"Deliver {name} outcomes and prepare downstream phases with production-grade quality."
         rebuilt.append({
-            "phase": f"Phase {i + 1}", "title": name, "name": name,
+            "phase": str(src_phase.get("phase") or f"Phase {i + 1}"), "title": str(src_phase.get("title") or name), "name": name,
             "date_range": phase_date_range,
-            "objective": f"Complete {name} deliverables with production-ready quality.",
-            "what_to_do": f"Deliver {len(ptasks)} scoped work item(s) for {name}.",
+            "goal": str(src_phase.get("goal") or goal),
+            "objective": str(src_phase.get("objective") or f"Complete {name} deliverables with production-ready quality."),
+            "what_to_do": str(src_phase.get("what_to_do") or f"Deliver {len(ptasks)} scoped work item(s) for {name}."),
             "when_to_do": phase_date_range, "how_to_do": how, "how_to_execute": how,
             "workstreams": workstreams, "subtasks_count": len(ptasks),
-            "deliverables": [pt["title"] for pt in ptasks[:6]],
-            "items": [pt["title"] for pt in ptasks],
+            "owners": owners,
+            "streams": streams,
+            "deliverables": deliverables,
+            "execution_notes": str(src_phase.get("execution_notes") or "Track dependency-critical tasks first, review risks weekly, and freeze scope before handoff."),
+            "items": [pt["title"] for pt in ptasks] or [str(x) for x in (src_phase.get("items") or []) if str(x).strip()],
             "subtasks": ptasks, "tasks": ptasks,
         })
+        milestone_tracker.append(
+            {
+                "milestone": f"M{i + 1}: {name}",
+                "deliverable": deliverables[0] if deliverables else f"Phase {i + 1} completion",
+                "primary_owner": owners[0] if owners else "Unassigned",
+            }
+        )
     roadmap["phases"] = rebuilt
+    roadmap["milestone_tracker"] = milestone_tracker
 
     return {"roadmap": roadmap, "tasks": normalized_tasks, "task_graph": task_graph, "phases": roadmap.get("phases") or []}
 
@@ -691,7 +749,7 @@ def run_planning_agent(
             workstream_guide = "Best-fit member per workstream (use this to set the `workstream` field):\n" + "\n".join(stream_hints)
 
     system_prompt = """
-You are a senior engineering lead decomposing a PRD into a detailed execution plan.
+You are a senior engineering lead producing only the first actionable roadmap tasks.
 
 Return STRICT JSON only — no prose, no markdown fences.
 
@@ -703,8 +761,8 @@ Required JSON shape:
       "tasks": [
         {
           "id": "unique_snake_case_id",
-          "title": "Short action-verb title (max 80 chars)",
-          "description": "2-3 sentences: what to build, expected deliverable, how to verify.",
+          "title": "Simple action title (max 60 chars)",
+          "description": "One short sentence.",
           "workstream": "backend|frontend|qa|devops|management|ai|product",
           "dependencies": ["prerequisite_task_id"],
           "priority": "low|medium|high",
@@ -728,31 +786,22 @@ MANDATORY RULES:
    GOOD: "Write E2E tests for attendance flow"
    BAD:  "Implement AI-based Face Recognition Attendance System: The SmartCampus..."
 
-2. DECOMPOSE every feature into at minimum 3 separate tasks:
-   - backend task: API design, data models, business logic
-   - frontend task: UI screens, components, user flows
-   - qa task: unit tests, integration tests, E2E tests
-   Add a devops task for anything needing infra, CI/CD, or deployment changes.
-   Add an ai task for anything involving ML model training or inference pipelines.
+2. Generate MIN 0 and MAX 2 tasks total.
+   - If the PRD does not provide enough clear scope, return zero tasks.
+   - Do not expand one feature into backend/frontend/qa triplets.
 
 3. WORKSTREAM must be exactly one of: backend | frontend | qa | devops | management | ai | product
    Set it based on the NATURE of the work, NOT the feature name.
    QA tasks must be for TEST WRITING work only — not general feature work.
 
-4. PHASES follow this corporate sequence (use as-is):
-   Phase 1: Foundation & Setup     — auth, DB schema, CI/CD, env config
-   Phase 2: Core Backend           — all REST APIs, business logic, data layer
-   Phase 3: Core Frontend          — all UI screens and component library
-   Phase 4: AI & Integrations      — ML models, third-party APIs, webhooks
-   Phase 5: QA & Hardening         — regression, performance, security, E2E
-   Phase 6: Deployment & Release   — staging deploy, monitoring, runbook
+4. Keep tasks simple and implementation-focused. Avoid long feature paragraphs.
+   BAD: "Implement Build ... leverages ... strategic analytics ..."
+   GOOD: "Implement deception detection API"
 
 5. DEPENDENCY ORDER must be realistic:
    DB schema → APIs → UI → QA → Release
 
-6. EFFORT estimates: backend 8-16h, frontend 10-20h, qa 4-10h, devops 4-8h, ai 12-24h, management 2-6h
-
-7. Produce AT LEAST 20 tasks and 5 phases. Never produce one task per feature.
+6. Use only phase labels "Phase 0" or "Phase 1" for initial tasks.
 """.strip()
 
     user_parts = [json.dumps(prd_for_llm, indent=2)]

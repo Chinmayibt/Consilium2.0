@@ -9,6 +9,7 @@ class WorkspaceMember(BaseModel):
     name: str | None = None
     email: str | None = None
     role: Literal["manager", "member"]
+    profile_role: str | None = None
     skills: List[str] = []
     joined_at: datetime = Field(default_factory=datetime.utcnow)
 

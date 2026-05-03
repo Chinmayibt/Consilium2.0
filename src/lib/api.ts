@@ -9,7 +9,7 @@
 const getBaseUrl = () => {
   const env = import.meta.env.VITE_API_URL as string | undefined;
   if (env && env.length > 0) return env.replace(/\/$/, "");
-  if (import.meta.env.DEV) return "";
+  if (import.meta.env.DEV) return "http://localhost:8001";
   return "http://localhost:8001";
 };
 
@@ -32,28 +32,41 @@ export interface TokenResponse {
 }
 
 export async function login(email: string, password: string): Promise<{ token: TokenResponse; user: ApiUser }> {
+  // #region agent log
+  fetch('http://127.0.0.1:7591/ingest/7e379b63-80c7-4857-8532-24c32abcd730',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'b7ceec'},body:JSON.stringify({sessionId:'b7ceec',runId:'login-investigation-1',hypothesisId:'H1',location:'api.ts:login:start',message:'frontend login start',data:{hasApiBaseUrl:apiBaseUrl.length>0,emailLen:email.trim().length},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
   const res = await fetch(`${apiBaseUrl}/api/v1/auth/login/json`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
   });
+  // #region agent log
+  fetch('http://127.0.0.1:7591/ingest/7e379b63-80c7-4857-8532-24c32abcd730',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'b7ceec'},body:JSON.stringify({sessionId:'b7ceec',runId:'login-investigation-1',hypothesisId:'H2',location:'api.ts:login:response',message:'frontend login response',data:{status:res.status,ok:res.ok},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
+    // #region agent log
+    fetch('http://127.0.0.1:7591/ingest/7e379b63-80c7-4857-8532-24c32abcd730',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'b7ceec'},body:JSON.stringify({sessionId:'b7ceec',runId:'login-investigation-1',hypothesisId:'H3',location:'api.ts:login:error',message:'frontend login non-200',data:{detailType:typeof err?.detail,hasDetail:Boolean(err?.detail)},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
     const msg = Array.isArray(err.detail) ? err.detail.map((e: { msg?: string }) => e.msg).join(", ") : (err.detail ?? "Login failed");
     throw new Error(msg);
   }
-  const token: TokenResponse = await res.json();
-  if (!token?.access_token) throw new Error("Invalid login response");
+  const data = (await res.json()) as {
+    access_token: string;
+    token_type?: string;
+    user?: ApiUser;
+  };
+  // #region agent log
+  fetch('http://127.0.0.1:7591/ingest/7e379b63-80c7-4857-8532-24c32abcd730',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'b7ceec'},body:JSON.stringify({sessionId:'b7ceec',runId:'login-investigation-1',hypothesisId:'H4',location:'api.ts:login:payload',message:'frontend login payload parsed',data:{hasAccessToken:Boolean(data?.access_token),hasUser:Boolean(data?.user),tokenType:data?.token_type??null},timestamp:Date.now()})}).catch(()=>{});
+  // #endregion
+  if (!data?.access_token) throw new Error("Invalid login response");
+  if (!data.user) throw new Error("Login response missing user payload");
 
-  const meRes = await fetch(`${apiBaseUrl}/api/v1/auth/me`, {
-    headers: { Authorization: `Bearer ${token.access_token}` },
-  });
-  if (!meRes.ok) {
-    const err = await meRes.json().catch(() => ({}));
-    throw new Error(typeof err.detail === "string" ? err.detail : "Failed to load user");
-  }
-  const user: ApiUser = await meRes.json();
-  return { token, user };
+  const token: TokenResponse = {
+    access_token: data.access_token,
+    token_type: data.token_type ?? "bearer",
+  };
+  return { token, user: data.user };
 }
 
 export async function forgotPassword(
@@ -405,6 +418,7 @@ export interface ApiTask {
   subtasks: string[] | null;
   source_meeting_id: string | null;
   is_auto_generated: boolean;
+  planner_generated?: boolean;
   /** When true, description was set by user/copilot/seed and is shown for AI tasks. */
   description_user_set?: boolean;
   created_at: string;
@@ -537,6 +551,7 @@ export async function getConsiliumGithubActivity(
 }
 
 export interface ConsiliumPrd {
+  executive_summary?: string;
   overview: string;
   problem_statement: string;
   target_users: string[];
@@ -556,13 +571,32 @@ export interface ConsiliumPrd {
   milestones: string[];
   mvp_scope: string[];
   future_enhancements: string[];
+  risks_and_mitigations?: string[];
+  assumptions_and_out_of_scope?: string[];
+  implementation_notes?: string[];
+  observability_and_reason_codes?: string[];
+  doc_sections?: Array<{
+    id: string;
+    title: string;
+    type: string;
+    content: string[];
+  }>;
   [key: string]: unknown;
 }
 
 export interface ConsiliumRoadmapPhase {
   phase?: string;
   title?: string;
+  goal?: string;
   date_range?: string;
+  owners?: string[];
+  streams?: Array<{
+    stream: string;
+    owner: string;
+    actions: string[];
+  }>;
+  deliverables?: string[];
+  execution_notes?: string;
   items?: string[];
 }
 
@@ -577,7 +611,30 @@ export interface ConsiliumRoadmapTask {
 
 export interface ConsiliumRoadmap {
   phases: ConsiliumRoadmapPhase[];
-  tasks: ConsiliumRoadmapTask[];
+  tasks?: ConsiliumRoadmapTask[];
+  milestone_tracker?: Array<{
+    milestone: string;
+    deliverable: string;
+    primary_owner: string;
+  }>;
+}
+
+export interface ConsiliumKanbanTask {
+  id?: string;
+  title?: string;
+  description?: string | null;
+  status?: string;
+  priority?: string;
+  assigned_to?: string | null;
+  assigned_to_name?: string | null;
+  assigned_user_id?: string | null;
+  assigned_name?: string | null;
+  created_at?: string;
+  updated_at?: string;
+  deadline?: string | null;
+  source_meeting_id?: string | null;
+  is_auto_generated?: boolean;
+  planner_generated?: boolean;
 }
 
 export async function generateConsiliumPrd(
@@ -590,6 +647,7 @@ export async function generateConsiliumPrd(
     key_features: string;
     competitors?: string;
     constraints?: string;
+    meeting_id?: string;
   },
 ): Promise<ConsiliumPrd> {
   const res = await fetch(`${apiBaseUrl}/api/workspaces/${encodeURIComponent(workspaceId)}/generate-prd`, {
@@ -663,6 +721,21 @@ export async function getConsiliumRoadmap(
   }
   const data = (await res.json()) as { roadmap: ConsiliumRoadmap | null };
   return data.roadmap;
+}
+
+export async function getConsiliumKanbanTasks(
+  token: string,
+  workspaceId: string,
+): Promise<ConsiliumKanbanTask[]> {
+  const res = await fetch(`${apiBaseUrl}/api/workspaces/${encodeURIComponent(workspaceId)}/kanban`, {
+    headers: getAuthHeaders(token),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(typeof err.detail === "string" ? err.detail : "Failed to load workspace kanban");
+  }
+  const data = (await res.json()) as { tasks?: ConsiliumKanbanTask[] };
+  return Array.isArray(data.tasks) ? data.tasks : [];
 }
 
 /** Project owner only: link `owner/repo` and toggle webhook deliveries. */

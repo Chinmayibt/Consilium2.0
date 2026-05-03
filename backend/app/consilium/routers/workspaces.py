@@ -35,7 +35,9 @@ async def _enrich_workspace_members(members_raw: list, created_at=None) -> List[
                 if user_doc:
                     m["name"] = m.get("name") or user_doc.get("name")
                     m["email"] = m.get("email") or user_doc.get("email")
-                    m["role"] = m.get("role") or user_doc.get("role", "member")
+                    if not m.get("role"):
+                        m["role"] = _normalize_workspace_role(user_doc.get("role"))
+                    m["profile_role"] = m.get("profile_role") or user_doc.get("role")
             except Exception:
                 pass
         if not m.get("joined_at"):
@@ -78,6 +80,7 @@ async def create_workspace(
         name=current_user.get("name"),
         email=current_user.get("email"),
         role="manager",
+        profile_role=current_user.get("role"),
         skills=current_user.get("skills") or [],
     )
 
@@ -203,6 +206,7 @@ async def resolve_workspace_from_project(
                 name=(member_doc or {}).get("name"),
                 email=(member_doc or {}).get("email"),
                 role=_normalize_workspace_role((member_doc or {}).get("role"), is_owner=is_owner),
+                profile_role=(member_doc or {}).get("role"),
                 skills=(member_doc or {}).get("skills") or [],
             ).model_dump()
         )
@@ -241,6 +245,7 @@ async def join_workspace(
             name=current_user.get("name"),
             email=current_user.get("email"),
             role=current_user["role"],
+            profile_role=current_user.get("role"),
             skills=current_user.get("skills") or [],
         )
         from datetime import datetime, timezone

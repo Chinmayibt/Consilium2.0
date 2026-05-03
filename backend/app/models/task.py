@@ -67,6 +67,7 @@ class TaskUpdate(BaseModel):
 class Task(TaskBase):
     id: str
     is_auto_generated: bool = False
+    planner_generated: bool = False
     # True when a user (or copilot/seed) intentionally set description; else meeting/STT junk is cleared on read.
     description_user_set: bool = False
     created_at: datetime

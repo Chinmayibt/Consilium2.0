@@ -1,5 +1,8 @@
 import re
+import json
+import time
 from urllib.parse import quote
+from pathlib import Path
 
 from bson import ObjectId
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -20,6 +23,30 @@ from app.core.dependencies import get_current_user, get_current_active_user
 from app.models.user import User, UserCreate, UserLogin, Token
 
 router = APIRouter()
+
+
+def _debug_log(hypothesis_id: str, location: str, message: str, data: dict) -> None:
+    payload = {
+        "sessionId": "b7ceec",
+        "runId": "login-investigation-1",
+        "hypothesisId": hypothesis_id,
+        "location": location,
+        "message": message,
+        "data": data,
+        "timestamp": int(time.time() * 1000),
+    }
+    try:
+        Path("debug-b7ceec.log").open("a", encoding="utf-8").write(
+            json.dumps(payload, ensure_ascii=True) + "\n"
+        )
+    except Exception:
+        pass
+
+
+class LoginJsonResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: User
 
 
 async def _find_user_by_email_ci(db, email: str):
@@ -106,16 +133,46 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     )
     return {"access_token": access_token, "token_type": "bearer"}
 
-@router.post("/login/json", response_model=Token)
+@router.post("/login/json", response_model=LoginJsonResponse)
 async def login_json(credentials: UserLogin):
     """
     Login endpoint that accepts JSON body instead of form-data
     Alternative to /login endpoint
     """
+    # region agent log
+    _debug_log(
+        "H1",
+        "auth.py:login_json:entry",
+        "login_json called",
+        {"email_len": len((credentials.email or "").strip())},
+    )
+    # endregion
     db = await get_database()
+    t_db_start = time.perf_counter()
     user = await db.users.find_one({"email": credentials.email})
+    db_ms = int((time.perf_counter() - t_db_start) * 1000)
+    # region agent log
+    _debug_log(
+        "H2",
+        "auth.py:login_json:after_find_one",
+        "user lookup finished",
+        {"user_found": bool(user), "db_ms": db_ms},
+    )
+    # endregion
     
-    if not user or not verify_password(credentials.password, user["hashed_password"]):
+    t_verify_start = time.perf_counter()
+    password_ok = bool(user) and verify_password(credentials.password, user["hashed_password"])
+    verify_ms = int((time.perf_counter() - t_verify_start) * 1000)
+    # region agent log
+    _debug_log(
+        "H3",
+        "auth.py:login_json:after_verify",
+        "password verification completed",
+        {"password_ok": password_ok, "verify_ms": verify_ms},
+    )
+    # endregion
+
+    if not password_ok:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
@@ -127,7 +184,23 @@ async def login_json(credentials: UserLogin):
         data={"sub": user["email"], "user_id": str(user["_id"]), "role": user["role"]},
         expires_delta=access_token_expires
     )
-    return {"access_token": access_token, "token_type": "bearer"}
+    user_payload = User(
+        id=str(user["_id"]),
+        **{k: v for k, v in user.items() if k not in {"_id", "hashed_password"}},
+    )
+    # region agent log
+    _debug_log(
+        "H4",
+        "auth.py:login_json:success",
+        "login_json successful response",
+        {"has_user_payload": bool(user_payload)},
+    )
+    # endregion
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+        "user": user_payload,
+    }
 
 @router.get("/me", response_model=User)
 async def get_current_user_info(current_user: User = Depends(get_current_active_user)):

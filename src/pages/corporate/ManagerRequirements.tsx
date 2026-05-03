@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/context/AuthContext";
-import { generateConsiliumPrd, resolveConsiliumWorkspaceId } from "@/lib/api";
+import { generateConsiliumPrd, listMeetings, resolveConsiliumWorkspaceId, type MeetingBotListItem } from "@/lib/api";
 import { managerNavItems } from "@/pages/corporate/managerNav";
 
 const ManagerRequirements = () => {
@@ -22,6 +22,25 @@ const ManagerRequirements = () => {
   const [keyFeatures, setKeyFeatures] = useState("");
   const [competitors, setCompetitors] = useState("");
   const [constraints, setConstraints] = useState("");
+  const [meetings, setMeetings] = useState<MeetingBotListItem[]>([]);
+  const [selectedMeetingId, setSelectedMeetingId] = useState("");
+
+  useEffect(() => {
+    if (!token || !workspaceId) return;
+    let mounted = true;
+    const run = async () => {
+      try {
+        const data = await listMeetings(token, workspaceId);
+        if (mounted) setMeetings(data.meetings ?? []);
+      } catch {
+        if (mounted) setMeetings([]);
+      }
+    };
+    void run();
+    return () => {
+      mounted = false;
+    };
+  }, [token, workspaceId]);
 
   const generatePrd = async () => {
     if (!token || !workspaceId) return;
@@ -36,6 +55,7 @@ const ManagerRequirements = () => {
         key_features: keyFeatures,
         competitors: competitors || undefined,
         constraints: constraints || undefined,
+        meeting_id: selectedMeetingId || undefined,
       });
       navigate(`/business/manager/workspaces/${workspaceId}/prd`);
     } catch (e) {
@@ -66,7 +86,7 @@ const ManagerRequirements = () => {
               <Label>Product Description</Label>
               <Textarea value={productDescription} onChange={(e) => setProductDescription(e.target.value)} />
             </div>
-            <div className="grid md:grid-cols-2 gap-4">
+            <div className="grid md:grid-cols-3 gap-4">
               <div className="space-y-2">
                 <Label>Target Users</Label>
                 <Textarea value={targetUsers} onChange={(e) => setTargetUsers(e.target.value)} />
@@ -77,6 +97,21 @@ const ManagerRequirements = () => {
               </div>
             </div>
             <div className="grid md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Select Kickoff Meeting (from history)</Label>
+                <select
+                  className="w-full h-10 rounded-md border bg-background px-3 text-sm"
+                  value={selectedMeetingId}
+                  onChange={(e) => setSelectedMeetingId(e.target.value)}
+                >
+                  <option value="">None</option>
+                  {meetings.map((meeting) => (
+                    <option key={meeting.id} value={meeting.id}>
+                      {(meeting.title || "Untitled meeting") + (meeting.started_at ? ` (${new Date(meeting.started_at).toLocaleString()})` : "")}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <div className="space-y-2">
                 <Label>Competitors (optional)</Label>
                 <Textarea value={competitors} onChange={(e) => setCompetitors(e.target.value)} />

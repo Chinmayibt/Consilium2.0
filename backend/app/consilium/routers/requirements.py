@@ -13,6 +13,7 @@ from app.consilium.agents.requirements_agent import run_requirements_agent
 from app.consilium.agents.planning_agent import run_planning_agent
 from app.consilium.database import get_db
 from app.consilium.dependencies import ensure_workspace_access, get_current_user
+from app.core.database import get_database
 from app.consilium.services.notification_service import trim_activity_log, trim_notifications
 from app.consilium.services.kanban_service import (
     KANBAN_STATUSES,
@@ -24,6 +25,8 @@ from app.consilium.services.planning_history_retrieval import retrieve_similar_t
 
 
 router = APIRouter(prefix="/api/workspaces", tags=["requirements"])
+_PROJECT_KANBAN_STATUSES = {"todo", "in_progress", "in_review", "done", "blockers"}
+_PROJECT_KANBAN_PRIORITIES = {"low", "medium", "high", "urgent"}
 
 
 class GeneratePrdRequest(BaseModel):
@@ -33,6 +36,8 @@ class GeneratePrdRequest(BaseModel):
     key_features: str
     competitors: str | None = None
     constraints: str | None = None
+    meeting_id: str | None = None
+    kickoff_transcript: str | None = None
 
 
 class GeneratePrdResponse(BaseModel):
@@ -90,6 +95,101 @@ def _normalize_prd(prd: Dict[str, Any] | None) -> Dict[str, Any]:
     return normalized
 
 
+def _normalize_project_task_status(raw: Any) -> str:
+    status = str(raw or "todo").strip().lower().replace("-", "_")
+    if status == "review":
+        status = "in_review"
+    elif status == "blocked":
+        status = "blockers"
+    return status if status in _PROJECT_KANBAN_STATUSES else "todo"
+
+
+def _normalize_project_task_priority(raw: Any) -> str:
+    priority = str(raw or "medium").strip().lower()
+    if priority in {"critical", "p0"}:
+        priority = "urgent"
+    elif priority in {"p1"}:
+        priority = "high"
+    return priority if priority in _PROJECT_KANBAN_PRIORITIES else "medium"
+
+
+def _coerce_datetime(raw: Any) -> datetime | None:
+    if isinstance(raw, datetime):
+        return raw
+    if raw is None:
+        return None
+    try:
+        text = str(raw).strip()
+        if not text:
+            return None
+        return datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+async def _upsert_planner_tasks_into_project(
+    db,
+    *,
+    workspace_id: str,
+    project_id: str,
+    tasks: List[Dict[str, Any]],
+) -> None:
+    if not project_id:
+        return
+    now = datetime.utcnow()
+    for idx, task in enumerate(tasks):
+        if not isinstance(task, dict):
+            continue
+        planner_task_id = str(task.get("id") or "").strip() or f"planner_{idx + 1}"
+        title = str(task.get("title") or "").strip()
+        if not title:
+            continue
+        assignee_id = str(task.get("assigned_to") or "").strip() or None
+        assignee_name = str(task.get("assigned_to_name") or "").strip() or None
+        status = _normalize_project_task_status(task.get("status"))
+        priority = _normalize_project_task_priority(task.get("priority"))
+        due_date = _coerce_datetime(task.get("deadline")) or _coerce_datetime(task.get("due_date"))
+        assigned_at = _coerce_datetime(task.get("assigned_at"))
+        completed_at = _coerce_datetime(task.get("completed_at"))
+        if status == "done" and completed_at is None:
+            completed_at = now
+        description = str(task.get("description") or "").strip() or None
+
+        set_doc: Dict[str, Any] = {
+            "project_id": project_id,
+            "title": title,
+            "description": description,
+            "description_user_set": bool(description),
+            "status": status,
+            "priority": priority,
+            "assignee_id": assignee_id,
+            "assignee_name": assignee_name,
+            "assigned_at": assigned_at,
+            "due_date": due_date,
+            "subtasks": task.get("subtasks") if isinstance(task.get("subtasks"), list) else None,
+            "completed_at": completed_at,
+            "last_activity_at": now,
+            "is_auto_generated": True,
+            "planner_generated": True,
+            "planner_task_id": planner_task_id,
+            "planner_workspace_id": workspace_id,
+            "planner_phase": task.get("phase"),
+            "planner_assigned_role": task.get("assigned_to_role"),
+            "copilot_created": False,
+            "updated_at": now,
+        }
+        await db.tasks.update_one(
+            {
+                "project_id": project_id,
+                "planner_generated": True,
+                "planner_workspace_id": workspace_id,
+                "planner_task_id": planner_task_id,
+            },
+            {"$set": set_doc, "$setOnInsert": {"created_at": now}},
+            upsert=True,
+        )
+
+
 @router.post(
     "/{workspace_id}/generate-prd",
     response_model=GeneratePrdResponse,
@@ -107,7 +207,16 @@ async def generate_prd_for_workspace(
     db = await get_db()
     workspaces = db["workspaces"]
 
-    prd = _normalize_prd(await _run_agent_async(payload))
+    kickoff_transcript = (payload.kickoff_transcript or "").strip()
+    if not kickoff_transcript and payload.meeting_id:
+        kickoff_transcript = await _resolve_meeting_transcript_for_workspace(
+            workspace=workspace,
+            meeting_id=payload.meeting_id,
+        )
+
+    input_payload = payload.model_dump()
+    input_payload["kickoff_transcript"] = kickoff_transcript or None
+    prd = _normalize_prd(await _run_agent_async(input_payload))
 
     # Save PRD only; roadmap is generated when PRD is finalized
     await workspaces.update_one(
@@ -239,6 +348,13 @@ async def finalize_workspace_prd(
 
     tasks = plan.get("tasks") or []
     kanban = build_kanban(tasks)
+    project_id = str(workspace.get("project_id") or "").strip()
+    await _upsert_planner_tasks_into_project(
+        db,
+        workspace_id=workspace_id,
+        project_id=project_id,
+        tasks=tasks,
+    )
 
     await workspaces.update_one(
         {"_id": oid},
@@ -387,6 +503,7 @@ async def get_workspace_roadmap(
     # Frontend expects roadmap to include phases and tasks
     roadmap = {
         "phases": raw_roadmap.get("phases", []),
+        "milestone_tracker": raw_roadmap.get("milestone_tracker", []),
         "tasks": tasks,
     }
     return RoadmapResponse(roadmap=roadmap)
@@ -684,11 +801,55 @@ async def get_workspace_risks(
     return RisksResponse(risks=risks)
 
 
-async def _run_agent_async(payload: GeneratePrdRequest) -> Dict[str, Any]:
+async def _run_agent_async(payload: Any) -> Dict[str, Any]:
     # LangGraph / OpenAI client are synchronous; run in thread to avoid blocking event loop
     from anyio import to_thread
 
+    data = payload.model_dump() if isinstance(payload, GeneratePrdRequest) else payload
+
     def _run() -> Dict[str, Any]:
-        return run_requirements_agent(payload.model_dump())
+        return run_requirements_agent(data)
 
     return await to_thread.run_sync(_run)
+
+
+async def _resolve_meeting_transcript_for_workspace(
+    workspace: Dict[str, Any],
+    meeting_id: str,
+) -> str:
+    core_db = await get_database()
+    try:
+        meeting_oid = ObjectId(meeting_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid meeting_id")
+
+    meeting = await core_db.meetings.find_one({"_id": meeting_oid})
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Selected meeting not found")
+
+    workspace_project_id = str(workspace.get("project_id") or "").strip()
+    meeting_project_id = str(meeting.get("project_id") or "").strip()
+    if workspace_project_id and meeting_project_id and workspace_project_id != meeting_project_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Selected meeting does not belong to this workspace project",
+        )
+
+    summary_doc = await core_db.summaries.find_one(
+        {"meeting_id": meeting_id},
+        sort=[("created_at", -1)],
+    )
+    if summary_doc:
+        cleaned = str(summary_doc.get("cleaned_transcription") or "").strip()
+        if cleaned:
+            return cleaned[:30000]
+
+    segments = (
+        await core_db.transcript_segments.find({"meeting_id": meeting_id})
+        .sort("timestamp", 1)
+        .to_list(length=5000)
+    )
+    if not segments:
+        return ""
+    joined = "\n".join(str(s.get("text") or "").strip() for s in segments if s.get("text"))
+    return joined[:30000]

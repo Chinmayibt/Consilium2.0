@@ -1,4 +1,5 @@
 import asyncio
+import time
 from typing import Optional
 
 from fastapi import FastAPI
@@ -29,6 +30,17 @@ app = FastAPI(
     description="Backend API for Meeting Monitor application",
     version="1.0.0",
 )
+
+
+@app.middleware("http")
+async def log_requests(request, call_next):
+    start = time.perf_counter()
+    response = await call_next(request)
+    elapsed_ms = int((time.perf_counter() - start) * 1000)
+    print(
+        f"[REQ] {request.method} {request.url.path} -> {response.status_code} ({elapsed_ms}ms)"
+    )
+    return response
 
 # Ensure CORS origins is always a list; include common dev origins (8080, 5173, 3000)
 _default_origins = [
@@ -69,7 +81,7 @@ async def _run_periodic_stale_sweep(interval_hours: int) -> None:
             db = await get_database()
             r = await mark_stale_tasks_all_projects(db)
             if r.get("marked"):
-                print(f"✅ stale task sweep: marked {r.get('marked')} task(s)")
+                print(f"[OK] stale task sweep: marked {r.get('marked')} task(s)")
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -86,15 +98,15 @@ async def startup_event():
             from groq import Groq
             client = Groq(api_key=settings.GROQ_API_KEY)
             list(client.models.list())  # minimal call to validate key
-            print("✅ GROQ_API_KEY valid (transcription enabled)")
+            print("[OK] GROQ_API_KEY valid (transcription enabled)")
         except Exception as e:
             err = str(e).lower()
             if "401" in err or "invalid" in err or "auth" in err:
-                print("❌ GROQ_API_KEY rejected by Groq. Create a new key at https://console.groq.com and replace GROQ_API_KEY in backend/.env")
+                print("[ERROR] GROQ_API_KEY rejected by Groq. Create a new key at https://console.groq.com and replace GROQ_API_KEY in backend/.env")
             else:
-                print("⚠️ GROQ check failed:", e)
+                print("[WARN] GROQ check failed:", e)
     else:
-        print("⚠️ GROQ_API_KEY missing in backend/.env — live transcription disabled. Get a key at https://console.groq.com")
+        print("[WARN] GROQ_API_KEY missing in backend/.env - live transcription disabled. Get a key at https://console.groq.com")
     await init_db()
 
     global _stale_sweep_bg_task
@@ -102,7 +114,7 @@ async def startup_event():
     if bg_h > 0:
         _stale_sweep_bg_task = asyncio.create_task(_run_periodic_stale_sweep(bg_h))
         print(
-            f"✅ Stale task background sweep scheduled every {bg_h}h "
+            f"[OK] Stale task background sweep scheduled every {bg_h}h "
             "(requires STALE_TASK_AUTO_BLOCKERS_ENABLED=true to mark tasks)"
         )
 
@@ -111,7 +123,7 @@ async def startup_event():
     await reset_workspace_signal_data_once()
     global _consilium_monitor_task
     _consilium_monitor_task = asyncio.create_task(monitoring_loop())
-    print("✅ Consilium monitoring loop started")
+    print("[OK] Consilium monitoring loop started")
 
 @app.on_event("shutdown")
 async def shutdown_event():

@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import DashboardLayout from "@/components/layout/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { getConsiliumRoadmap, resolveConsiliumWorkspaceId, type ConsiliumRoadmap } from "@/lib/api";
 import { useAuth } from "@/context/AuthContext";
@@ -51,29 +50,59 @@ const ManagerRoadmap = () => {
         {!loading && !roadmap && <p className="text-sm text-muted-foreground">No roadmap available yet.</p>}
 
         {roadmap && (
-          <div className="grid gap-6 lg:grid-cols-2">
+          <div className="space-y-6">
             <Card>
-              <CardHeader><CardTitle>Phases</CardTitle></CardHeader>
+              <CardHeader><CardTitle>Strategic Roadmap</CardTitle></CardHeader>
               <CardContent className="space-y-3">
                 {(roadmap.phases || []).map((phase, idx) => (
                   <div key={`${phase.phase || "phase"}-${idx}`} className="rounded border p-3">
-                    <p className="font-medium">{phase.phase || `Phase ${idx + 1}`}</p>
-                    <p className="text-sm">{phase.title || ""}</p>
+                    <p className="font-medium">{phase.phase || `Phase ${idx + 1}`}: {phase.title || ""}</p>
                     {phase.date_range && <p className="text-xs text-muted-foreground mt-1">{phase.date_range}</p>}
+                    {phase.goal && <p className="text-sm mt-2">{phase.goal}</p>}
+                    {(phase.streams || []).length > 0 && (
+                      <div className="mt-3 space-y-2">
+                        {(phase.streams || []).map((stream, sidx) => (
+                          <div key={`${phase.phase || idx}-stream-${sidx}`} className="rounded bg-muted/40 p-2">
+                            <p className="text-sm font-medium capitalize">
+                              {stream.stream} {stream.owner ? `(${stream.owner})` : ""}
+                            </p>
+                            <ul className="mt-1 list-disc pl-5 text-sm text-muted-foreground">
+                              {(stream.actions || []).map((action, aidx) => (
+                                <li key={`${phase.phase || idx}-stream-${sidx}-action-${aidx}`}>{action}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {(phase.deliverables || []).length > 0 && (
+                      <div className="mt-3">
+                        <p className="text-sm font-medium">Deliverables</p>
+                        <ul className="list-disc pl-5 text-sm text-muted-foreground">
+                          {(phase.deliverables || []).map((d, didx) => (
+                            <li key={`${phase.phase || idx}-deliv-${didx}`}>{d}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {phase.execution_notes && (
+                      <p className="text-xs text-muted-foreground mt-2">{phase.execution_notes}</p>
+                    )}
                   </div>
                 ))}
               </CardContent>
             </Card>
             <Card>
-              <CardHeader><CardTitle>Tasks</CardTitle></CardHeader>
-              <CardContent className="space-y-3">
-                {(roadmap.tasks || []).map((task, idx) => (
-                  <div key={`${task.id || "task"}-${idx}`} className="rounded border p-3">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="font-medium">{task.title || "Untitled task"}</p>
-                      <Badge variant="outline">{task.status || "todo"}</Badge>
-                    </div>
-                    <p className="text-sm text-muted-foreground mt-1">{task.description || ""}</p>
+              <CardHeader><CardTitle>Milestone Tracker</CardTitle></CardHeader>
+              <CardContent className="space-y-2">
+                {(roadmap.milestone_tracker || []).length === 0 && (
+                  <p className="text-sm text-muted-foreground">No milestones available yet.</p>
+                )}
+                {(roadmap.milestone_tracker || []).map((m, idx) => (
+                  <div key={`${m.milestone}-${idx}`} className="grid grid-cols-1 gap-1 rounded border p-3 md:grid-cols-3">
+                    <p className="text-sm font-medium">{m.milestone}</p>
+                    <p className="text-sm text-muted-foreground">{m.deliverable}</p>
+                    <p className="text-sm">{m.primary_owner}</p>
                   </div>
                 ))}
               </CardContent>

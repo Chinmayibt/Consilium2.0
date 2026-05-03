@@ -17,11 +17,11 @@ async def init_db():
     db.client = AsyncIOMotorClient(settings.MONGODB_URL)
     # Test connection
     await db.client.admin.command('ping')
-    print(f"✅ Connected to MongoDB: {settings.MONGODB_DB_NAME}")
+    print(f"[OK] Connected to MongoDB: {settings.MONGODB_DB_NAME}")
     
     # Create indexes
     await create_indexes()
-    print("✅ Database indexes created")
+    print("[OK] Database indexes created")
 
 async def create_indexes():
     """Create database indexes for performance. Idempotent: does not crash if index already exists."""
@@ -102,4 +102,4 @@ async def close_db():
     """Close database connection"""
     if db.client:
         db.client.close()
-        print("✅ MongoDB connection closed")
+        print("[OK] MongoDB connection closed")

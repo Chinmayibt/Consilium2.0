@@ -18,5 +18,13 @@ if __name__ == "__main__":
         "app.main:app",
         host=settings.HOST,
         port=settings.PORT,
-        reload=True
+        reload=True,
+        reload_excludes=[
+            "venv/*",
+            "venv/**",
+            "__pycache__/*",
+            "__pycache__/**",
+            ".pytest_cache/*",
+            ".pytest_cache/**",
+        ],
     )

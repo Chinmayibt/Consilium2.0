@@ -436,7 +436,7 @@ async def _run_monitoring_once() -> None:
         await run_graph_for_workspace(str(workspace["_id"]), github_events=github_events)
 
 
-async def monitoring_loop(poll_interval_seconds: int = 30) -> None:
+async def monitoring_loop(poll_interval_seconds: int = 300) -> None:
     await asyncio.sleep(5)
     while True:
         try:

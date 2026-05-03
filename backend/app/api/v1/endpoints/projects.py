@@ -119,9 +119,13 @@ async def get_project(
             {"source_meeting_id": {"$in": valid_meeting_ids}},
             {"synced_from_meeting_ids": {"$in": valid_meeting_ids}},
             {"copilot_created": True},
+            {"planner_generated": True},
         ]
     else:
-        task_filter["$or"] = [{"copilot_created": True}]
+        task_filter["$or"] = [
+            {"copilot_created": True},
+            {"planner_generated": True},
+        ]
     task_docs = await db.tasks.find(task_filter).sort("created_at", -1).to_list(length=500)
     tasks = [await task_with_key(db, t) for t in task_docs]
     return ProjectDetail(**project_out.model_dump(), tasks=tasks)
